@@ -141,11 +141,11 @@ class PointsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         # Red punishment buttons
-        self.add_item(PointButton("Open YouTube (punishment)", "open_youtube", discord.ButtonStyle.danger))
-        self.add_item(PointButton("Open Instagram (punishment)", "open_instagram", discord.ButtonStyle.danger))
-        self.add_item(PointButton("Watch Video (punishment)", "video", discord.ButtonStyle.danger))
-        self.add_item(PointButton("Watch Reel (punishment)", "reel", discord.ButtonStyle.danger))
-        self.add_item(PointButton("Open Game (punishment)", "open_game", discord.ButtonStyle.danger))
+        self.add_item(PointButton("Open YouTube", "open_youtube", discord.ButtonStyle.danger))
+        self.add_item(PointButton("Open Instagram", "open_instagram", discord.ButtonStyle.danger))
+        self.add_item(PointButton("Watch Video", "video", discord.ButtonStyle.danger))
+        self.add_item(PointButton("Watch Reel", "reel", discord.ButtonStyle.danger))
+        self.add_item(PointButton("Open Game", "open_game", discord.ButtonStyle.danger))
         # Blue dare buttons
         self.add_item(PointButton("DARE", "dare", discord.ButtonStyle.primary))
         self.add_item(PointButton("DOUBLE DARE", "double_dare", discord.ButtonStyle.primary))
@@ -258,4 +258,5 @@ if __name__ == "__main__":
     Thread(target=run_web).start()
 
     bot.run(TOKEN)
+
 
