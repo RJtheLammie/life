@@ -1,45 +1,40 @@
-# bot.py
+# life.py
 import os
 import sqlite3
-import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
+from threading import Thread
+from flask import Flask
 
 import discord
-from discord.ext import commands, tasks
-from discord import app_commands
+from discord.ext import commands
 
-# ---------- CONFIG ----------
+# ---------------- CONFIG ----------------
 TOKEN = os.getenv("TOKEN")
-GUILD_ID = None  # Optional: set your guild id to register commands to one guild quickly, else None
+GUILD_ID = None  # replace with your server ID for instant slash command sync
+BUTTON_COOLDOWN = 10  # seconds per user per button
 
-# cooldown seconds per user per button
-BUTTON_COOLDOWN = 10
+DB_PATH = "points.db"
 
-# Points mapping (you can edit these)
+# Points mapping
 POINTS = {
-    # punishments (negative)
+    # Punishments (red, negative)
     "open_youtube": -15,
     "open_instagram": -15,
     "video": -5,
     "reel": -10,
     "open_game": -15,
-    "dare": -50,
-    "double_dare": -80,
-    # nourishment (positive)
-    "timetable_chunk": +5,
-    "make_grad_video": +15,
-    "reconnect_friends": +10,
+    # Nourishment (green, positive)
+    "timetable_chunk": 5,
+    "make_grad_video": 15,
+    "reconnect_friends": 10,
+    # Dare buttons (blue, add points)
+    "dare": 50,
+    "double_dare": 80,
+    # Reset button handled separately
+    "reset": 0,
 }
 
-DB_PATH = "points.db"
-# ----------------------------
-
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = False  # not required for buttons/actions
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# --- Database helpers ---
+# ---------------- DATABASE ----------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -71,8 +66,11 @@ def get_points(user_id: int) -> int:
 def set_points(user_id: int, points: int):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT INTO users (user_id, points, last_updated) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET points=excluded.points, last_updated=excluded.last_updated",
-              (user_id, points, datetime.utcnow().isoformat()))
+    c.execute(
+        "INSERT INTO users (user_id, points, last_updated) VALUES (?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET points=excluded.points, last_updated=excluded.last_updated",
+        (user_id, points, datetime.utcnow().isoformat())
+    )
     conn.commit()
     conn.close()
 
@@ -90,171 +88,143 @@ def top_leaderboard(limit=10):
     conn.close()
     return rows
 
-# --- Simple per-user cooldown tracker ---
-# maps (user_id, action_key) -> datetime of last click
+# ---------------- COOLDOWNS ----------------
 _click_timestamps = {}
 
-def is_on_cooldown(user_id: int, action_key: str) -> (bool, float):
-    key = (user_id, action_key)
-    last = _click_timestamps.get(key)
+def is_on_cooldown(user_id: int, key: str):
+    last = _click_timestamps.get((user_id, key))
     if last:
         elapsed = (datetime.utcnow() - last).total_seconds()
         if elapsed < BUTTON_COOLDOWN:
             return True, BUTTON_COOLDOWN - elapsed
     return False, 0.0
 
-def set_click_time(user_id: int, action_key: str):
-    key = (user_id, action_key)
-    _click_timestamps[key] = datetime.utcnow()
+def set_click_time(user_id: int, key: str):
+    _click_timestamps[(user_id, key)] = datetime.utcnow()
 
-# --- UI: build a View with buttons ---
+# ---------------- BUTTON UI ----------------
 class PointButton(discord.ui.Button):
-    def __init__(self, label: str, key: str, style: discord.ButtonStyle = discord.ButtonStyle.primary):
+    def __init__(self, label: str, key: str, style: discord.ButtonStyle):
         super().__init__(label=label, style=style, custom_id=f"pointbtn:{key}")
         self.key = key
 
     async def callback(self, interaction: discord.Interaction):
         user = interaction.user
-        # cooldown
         on_cd, remaining = is_on_cooldown(user.id, self.key)
         if on_cd:
             await interaction.response.send_message(
                 f"You're on cooldown for this action. Try again in {remaining:.1f}s.", ephemeral=True
             )
             return
-
         set_click_time(user.id, self.key)
+
+        if self.key == "reset":
+            set_points(user.id, 0)
+            await interaction.response.send_message(f"{user.mention}, your points have been reset to 0.", ephemeral=True)
+            return
 
         delta = POINTS.get(self.key, 0)
         new_total = add_points(user.id, delta)
-
-        # ephemeral confirm
         sign = "+" if delta >= 0 else ""
-        action_name = self.label
         await interaction.response.send_message(
-            f"{action_name}: {sign}{delta} points. Your new total is {new_total} points.", ephemeral=True
+            f"{self.label}: {sign}{delta} points. Your new total is {new_total} points.", ephemeral=True
         )
 
 class PointsView(discord.ui.View):
-    def __init__(self, timeout: int = None):
-        super().__init__(timeout=timeout)
-        # Punishment buttons (negative)
+    def __init__(self):
+        super().__init__(timeout=None)
+        # Red punishment buttons
         self.add_item(PointButton("Open YouTube (punishment)", "open_youtube", discord.ButtonStyle.danger))
         self.add_item(PointButton("Open Instagram (punishment)", "open_instagram", discord.ButtonStyle.danger))
         self.add_item(PointButton("Watch Video (punishment)", "video", discord.ButtonStyle.danger))
         self.add_item(PointButton("Watch Reel (punishment)", "reel", discord.ButtonStyle.danger))
         self.add_item(PointButton("Open Game (punishment)", "open_game", discord.ButtonStyle.danger))
-        self.add_item(PointButton("DARE (big)", "dare", discord.ButtonStyle.secondary))
-        self.add_item(PointButton("DOUBLE DARE (huge)", "double_dare", discord.ButtonStyle.secondary))
-        # Nourishment (positive)
-        self.add_item(PointButton("Timetable chunk (nourish)", "timetable_chunk", discord.ButtonStyle.success))
-        self.add_item(PointButton("Make grad video (nourish)", "make_grad_video", discord.ButtonStyle.success))
-        self.add_item(PointButton("Reconnect with friends (nourish)", "reconnect_friends", discord.ButtonStyle.success))
+        # Blue dare buttons
+        self.add_item(PointButton("DARE", "dare", discord.ButtonStyle.primary))
+        self.add_item(PointButton("DOUBLE DARE", "double_dare", discord.ButtonStyle.primary))
+        # Green nourishment buttons
+        self.add_item(PointButton("Timetable chunk", "timetable_chunk", discord.ButtonStyle.success))
+        self.add_item(PointButton("Make grad video", "make_grad_video", discord.ButtonStyle.success))
+        self.add_item(PointButton("Reconnect with friends", "reconnect_friends", discord.ButtonStyle.success))
+        # Reset button (grey/white)
+        self.add_item(PointButton("Reset Points", "reset", discord.ButtonStyle.secondary))
 
-# --- Bot commands ---
+# ---------------- BOT SETUP ----------------
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="/", intents=intents)
+
 @bot.event
 async def on_ready():
     init_db()
     print(f"Logged in as {bot.user} (id: {bot.user.id})")
-    print("------")
     try:
-        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID)) if GUILD_ID else await bot.tree.sync()
-        print(f"Slash commands synced ({len(synced)}).")
+        if GUILD_ID:
+            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        else:
+            await bot.tree.sync()
+        print("Slash commands synced.")
     except Exception as e:
         print("Could not sync commands:", e)
 
-# Send a persistent interactive scoreboard message (admin-only)
-@bot.command(name="post_buttons")
-@commands.has_permissions(administrator=True)
-async def post_buttons(ctx: commands.Context):
-    """Post the interactive points panel (admins only)."""
-    view = PointsView(timeout=None)
+# ---------------- SLASH COMMANDS ----------------
+@bot.tree.command(name="panel", description="Post the interactive points panel")
+async def panel(interaction: discord.Interaction):
+    view = PointsView()
     embed = discord.Embed(
         title="Focus Points Panel",
-        description="Click the buttons below to self-report actions. Punishments deduct points; nourishment grants points.\n"
-                    "Use `/mypoints` to check your balance. Admins can use `!setpoints @user number`.",
+        description="Click buttons below to self-report actions.\nPunishments deduct points; nourishment grants points.\nUse `/mypoints` to check your balance.",
         color=discord.Color.blurple()
     )
-    await ctx.send(embed=embed, view=view)
+    await interaction.response.send_message(embed=embed, view=view)
 
-@bot.command(name="force_add")
-@commands.has_permissions(administrator=True)
-async def force_add(ctx: commands.Context, member: discord.Member, delta: int):
-    """Admin command: add (or subtract) points from a user."""
-    new = add_points(member.id, delta)
-    await ctx.send(f"Updated {member.mention} by {delta:+d}. New total: {new} points.")
-
-@bot.command(name="setpoints")
-@commands.has_permissions(administrator=True)
-async def setpoints(ctx: commands.Context, member: discord.Member, points: int):
-    set_points(member.id, points)
-    await ctx.send(f"Set {member.mention}'s points to {points}.")
-
-@bot.command(name="mypoints")
-async def mypoints(ctx: commands.Context, member: discord.Member = None):
-    member = member or ctx.author
+@bot.tree.command(name="mypoints", description="Check your points")
+async def mypoints(interaction: discord.Interaction, member: discord.Member = None):
+    member = member or interaction.user
     pts = get_points(member.id)
-    await ctx.send(f"{member.mention} has **{pts}** points.")
+    await interaction.response.send_message(f"{member.mention} has **{pts} points**.")
 
-@bot.command(name="leaderboard")
-async def leaderboard(ctx: commands.Context):
+@bot.tree.command(name="leaderboard", description="Show top 10 users")
+async def leaderboard(interaction: discord.Interaction):
     rows = top_leaderboard(10)
     if not rows:
-        await ctx.send("Leaderboard is empty.")
+        await interaction.response.send_message("Leaderboard is empty.")
         return
     desc = []
     for idx, (user_id, pts) in enumerate(rows, start=1):
         user = bot.get_user(user_id)
         name = user.name if user else f"User ID {user_id}"
         desc.append(f"**{idx}.** {name} — {pts} pts")
-    embed = discord.Embed(title="Points Leaderboard", description="\n".join(desc), color=discord.Color.gold())
-    await ctx.send(embed=embed)
+    await interaction.response.send_message("\n".join(desc))
 
-@bot.command(name="reset_points")
-@commands.has_permissions(administrator=True)
-async def reset_points(ctx: commands.Context, member: discord.Member = None):
+@bot.tree.command(name="reset_points", description="Reset points for a user or yourself (admins can reset anyone)")
+async def reset_points(interaction: discord.Interaction, member: discord.Member = None):
     if member:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Only admins can reset other users' points.", ephemeral=True)
+            return
         set_points(member.id, 0)
-        await ctx.send(f"Reset {member.mention}'s points to 0.")
+        await interaction.response.send_message(f"{member.mention}'s points have been reset to 0.")
     else:
-        # reset ALL (dangerous)
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("UPDATE users SET points = 0, last_updated = ?", (datetime.utcnow().isoformat(),))
-        conn.commit()
-        conn.close()
-        await ctx.send("Reset all users' points to 0.")
+        set_points(interaction.user.id, 0)
+        await interaction.response.send_message(f"{interaction.user.mention}, your points have been reset to 0.")
 
-# Slash command to open panel (alternative to post_buttons)
-@bot.tree.command(name="panel", description="Post the interactive points panel")
-async def panel(interaction: discord.Interaction):
-    # permission check: only allow in guilds
-    if interaction.guild is None:
-        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
-        return
-    member = interaction.user
-    # allow only admins to post
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("Only server admins may create the panel.", ephemeral=True)
-        return
-    view = PointsView(timeout=None)
-    embed = discord.Embed(
-        title="Focus Points Panel",
-        description="Click the buttons below to self-report actions. Punishments deduct points; nourishment grants points.\n"
-                    "Use `/mypoints` to check your balance.",
-        color=discord.Color.blurple()
-    )
-    await interaction.response.send_message(embed=embed, view=view)
-
-# Optional: button to display user's recent history (could be expanded)
-@bot.command(name="history")
-async def history(ctx: commands.Context, member: discord.Member = None):
-    member = member or ctx.author
-    pts = get_points(member.id)
-    await ctx.send(f"{member.mention} current points: {pts}. (Detailed event history not implemented.)")
-
-# Run bot
+# ---------------- RUN BOT ----------------
 if __name__ == "__main__":
     init_db()
-    bot.run(TOKEN)
 
+    # Optional keep-alive web server for Render / Railway
+    app = Flask('')
+
+    @app.route('/')
+    def home():
+        return "Bot is alive!"
+
+    def run_web():
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port)
+
+    Thread(target=run_web).start()
+
+    bot.run(TOKEN)
