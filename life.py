@@ -34,6 +34,13 @@ POINTS = {
     "reset": 0,
 }
 
+# Predefined dare list
+DARES = [
+    "Eat an apple 🍎",
+    "Eat an orange 🍊",
+    "Eat a banana 🍌"
+]
+
 # ---------------- DATABASE ----------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -149,6 +156,29 @@ class PointsView(discord.ui.View):
         # Reset button (grey/white)
         self.add_item(PointButton("Reset Points", "reset", discord.ButtonStyle.secondary))
 
+class DareView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(DareButton())
+
+class DareButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Generate a dare", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        dare = random.choice(DARES)
+        await interaction.response.send_message(f"🎲 Your dare: **{dare}**", ephemeral=True)
+
+# Slash command for dare
+@bot.tree.command(name="dare", description="Get a random dare")
+async def dare(interaction: discord.Interaction):
+    view = DareView()
+    await interaction.response.send_message(
+        "Click the button to generate a random dare!",
+        view=view,
+        ephemeral=True
+    )
+
 # ---------------- BOT SETUP ----------------
 intents = discord.Intents.default()
 intents.messages = True
@@ -228,3 +258,4 @@ if __name__ == "__main__":
     Thread(target=run_web).start()
 
     bot.run(TOKEN)
+
