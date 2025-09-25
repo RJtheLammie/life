@@ -41,6 +41,68 @@ DARES = [
     "Eat a banana 🍌"
 ]
 
+# ---------------- BOT SETUP ----------------
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="/", intents=intents)
+
+@bot.event
+async def on_ready():
+    init_db()
+    print(f"Logged in as {bot.user} (id: {bot.user.id})")
+    try:
+        if GUILD_ID:
+            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        else:
+            await bot.tree.sync()
+        print("Slash commands synced.")
+    except Exception as e:
+        print("Could not sync commands:", e)
+
+# ---------------- SLASH COMMANDS ----------------
+@bot.tree.command(name="panel", description="Post the interactive points panel")
+async def panel(interaction: discord.Interaction):
+    view = PointsView()
+    embed = discord.Embed(
+        title="Focus Points Panel",
+        description="Click buttons below to self-report actions.\nPunishments deduct points; nourishment grants points.\nUse `/score` to check your balance.",
+        color=discord.Color.blurple()
+    )
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="score", description="Check your points")
+async def score(interaction: discord.Interaction, member: discord.Member = None):
+    member = member or interaction.user
+    pts = get_points(member.id)
+    await interaction.response.send_message(f"{member.mention} has **{pts} points**.")
+
+@bot.tree.command(name="leaderboard", description="Show top 10 users")
+async def leaderboard(interaction: discord.Interaction):
+    rows = top_leaderboard(10)
+    if not rows:
+        await interaction.response.send_message("Leaderboard is empty.")
+        return
+    desc = []
+    for idx, (user_id, pts) in enumerate(rows, start=1):
+        user = bot.get_user(user_id)
+        name = user.name if user else f"User ID {user_id}"
+        desc.append(f"**{idx}.** {name} — {pts} pts")
+    await interaction.response.send_message("\n".join(desc))
+
+@bot.tree.command(name="reset_points", description="Reset points for a user or yourself (admins can reset anyone)")
+async def reset_points(interaction: discord.Interaction, member: discord.Member = None):
+    if member:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Only admins can reset other users' points.", ephemeral=False)
+            return
+        set_points(member.id, 0)
+        await interaction.response.send_message(f"{member.mention}'s points have been reset to 0.")
+    else:
+        set_points(interaction.user.id, 0)
+        await interaction.response.send_message(f"{interaction.user.mention}, your points have been reset to 0.")
+        
+
 # ---------------- DATABASE ----------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -179,66 +241,7 @@ async def dare(interaction: discord.Interaction):
         ephemeral=False
     )
 
-# ---------------- BOT SETUP ----------------
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="/", intents=intents)
 
-@bot.event
-async def on_ready():
-    init_db()
-    print(f"Logged in as {bot.user} (id: {bot.user.id})")
-    try:
-        if GUILD_ID:
-            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        else:
-            await bot.tree.sync()
-        print("Slash commands synced.")
-    except Exception as e:
-        print("Could not sync commands:", e)
-
-# ---------------- SLASH COMMANDS ----------------
-@bot.tree.command(name="panel", description="Post the interactive points panel")
-async def panel(interaction: discord.Interaction):
-    view = PointsView()
-    embed = discord.Embed(
-        title="Focus Points Panel",
-        description="Click buttons below to self-report actions.\nPunishments deduct points; nourishment grants points.\nUse `/score` to check your balance.",
-        color=discord.Color.blurple()
-    )
-    await interaction.response.send_message(embed=embed, view=view)
-
-@bot.tree.command(name="score", description="Check your points")
-async def score(interaction: discord.Interaction, member: discord.Member = None):
-    member = member or interaction.user
-    pts = get_points(member.id)
-    await interaction.response.send_message(f"{member.mention} has **{pts} points**.")
-
-@bot.tree.command(name="leaderboard", description="Show top 10 users")
-async def leaderboard(interaction: discord.Interaction):
-    rows = top_leaderboard(10)
-    if not rows:
-        await interaction.response.send_message("Leaderboard is empty.")
-        return
-    desc = []
-    for idx, (user_id, pts) in enumerate(rows, start=1):
-        user = bot.get_user(user_id)
-        name = user.name if user else f"User ID {user_id}"
-        desc.append(f"**{idx}.** {name} — {pts} pts")
-    await interaction.response.send_message("\n".join(desc))
-
-@bot.tree.command(name="reset_points", description="Reset points for a user or yourself (admins can reset anyone)")
-async def reset_points(interaction: discord.Interaction, member: discord.Member = None):
-    if member:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Only admins can reset other users' points.", ephemeral=False)
-            return
-        set_points(member.id, 0)
-        await interaction.response.send_message(f"{member.mention}'s points have been reset to 0.")
-    else:
-        set_points(interaction.user.id, 0)
-        await interaction.response.send_message(f"{interaction.user.mention}, your points have been reset to 0.")
 
 # ---------------- RUN BOT ----------------
 if __name__ == "__main__":
@@ -258,6 +261,7 @@ if __name__ == "__main__":
     Thread(target=run_web).start()
 
     bot.run(TOKEN)
+
 
 
 
