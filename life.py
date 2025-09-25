@@ -120,21 +120,21 @@ class PointButton(discord.ui.Button):
         on_cd, remaining = is_on_cooldown(user.id, self.key)
         if on_cd:
             await interaction.response.send_message(
-                f"You're on cooldown for this action. Try again in {remaining:.1f}s.", ephemeral=True
+                f"You're on cooldown for this action. Try again in {remaining:.1f}s.", ephemeral=False
             )
             return
         set_click_time(user.id, self.key)
 
         if self.key == "reset":
             set_points(user.id, 0)
-            await interaction.response.send_message(f"{user.mention}, your points have been reset to 0.", ephemeral=True)
+            await interaction.response.send_message(f"{user.mention}, your points have been reset to 0.", ephemeral=False)
             return
 
         delta = POINTS.get(self.key, 0)
         new_total = add_points(user.id, delta)
         sign = "+" if delta >= 0 else ""
         await interaction.response.send_message(
-            f"{self.label}: {sign}{delta} points. Your new total is {new_total} points.", ephemeral=True
+            f"{self.label}: {sign}{delta} points. Your new total is {new_total} points.", ephemeral=False
         )
 
 class PointsView(discord.ui.View):
@@ -167,7 +167,7 @@ class DareButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         dare = random.choice(DARES)
-        await interaction.response.send_message(f"🎲 Your dare: **{dare}**", ephemeral=True)
+        await interaction.response.send_message(f"🎲 Your dare: **{dare}**", ephemeral=False)
 
 # Slash command for dare
 @bot.tree.command(name="dare", description="Get a random dare")
@@ -176,7 +176,7 @@ async def dare(interaction: discord.Interaction):
     await interaction.response.send_message(
         "Click the button to generate a random dare!",
         view=view,
-        ephemeral=True
+        ephemeral=False
     )
 
 # ---------------- BOT SETUP ----------------
@@ -232,7 +232,7 @@ async def leaderboard(interaction: discord.Interaction):
 async def reset_points(interaction: discord.Interaction, member: discord.Member = None):
     if member:
         if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Only admins can reset other users' points.", ephemeral=True)
+            await interaction.response.send_message("Only admins can reset other users' points.", ephemeral=False)
             return
         set_points(member.id, 0)
         await interaction.response.send_message(f"{member.mention}'s points have been reset to 0.")
@@ -258,5 +258,6 @@ if __name__ == "__main__":
     Thread(target=run_web).start()
 
     bot.run(TOKEN)
+
 
 
