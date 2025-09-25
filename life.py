@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 # ---------- CONFIG ----------
-TOKEN = os.getenv("DISCORD_TOKEN") or "PASTE_YOUR_TOKEN_HERE"
+TOKEN = os.getenv("TOKEN")
 GUILD_ID = None  # Optional: set your guild id to register commands to one guild quickly, else None
 
 # cooldown seconds per user per button
@@ -257,3 +257,4 @@ async def history(ctx: commands.Context, member: discord.Member = None):
 if __name__ == "__main__":
     init_db()
     bot.run(TOKEN)
+
