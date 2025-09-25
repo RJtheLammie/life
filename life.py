@@ -204,13 +204,13 @@ async def panel(interaction: discord.Interaction):
     view = PointsView()
     embed = discord.Embed(
         title="Focus Points Panel",
-        description="Click buttons below to self-report actions.\nPunishments deduct points; nourishment grants points.\nUse `/mypoints` to check your balance.",
+        description="Click buttons below to self-report actions.\nPunishments deduct points; nourishment grants points.\nUse `/score` to check your balance.",
         color=discord.Color.blurple()
     )
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="mypoints", description="Check your points")
-async def mypoints(interaction: discord.Interaction, member: discord.Member = None):
+@bot.tree.command(name="score", description="Check your points")
+async def score(interaction: discord.Interaction, member: discord.Member = None):
     member = member or interaction.user
     pts = get_points(member.id)
     await interaction.response.send_message(f"{member.mention} has **{pts} points**.")
