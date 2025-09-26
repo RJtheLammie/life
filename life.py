@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime
 from threading import Thread
 from flask import Flask
+import random
 
 import discord
 from discord.ext import commands
@@ -261,6 +262,7 @@ if __name__ == "__main__":
     Thread(target=run_web).start()
 
     bot.run(TOKEN)
+
 
 
 
